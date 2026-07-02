@@ -240,34 +240,37 @@ with pestana_votar:
         st.warning("⚠️ Por favor ingresa tu Institución o Nombre en el campo de arriba para habilitar la votación.")
 
 # =========================================================================
-# 📊 PESTAÑA 2: PANTALLA DE RESULTADOS EN TIEMPO REAL
+# 📊 PESTAÑA 2: PANTALLA DE RESULTADOS EN TIEMPO REAL (Para Proyectar)
 # =========================================================================
 with pestana_dashboard:
     st.title("📊 Cuadrante de Validación Estratégica en Vivo")
     st.write("Esta pantalla consolida los promedios matemáticos de todos los participantes.")
     
+    # Botón manual para refrescar los datos desde Google Sheets durante el taller
     if st.button("🔄 Forzar Actualización de la Matriz"):
         st.rerun()
         
+    # Recargamos la variable con los datos más recientes
     datos_actuales = df_respuestas if modo_hoja_real else st.session_state.db_simulada
     
     if not datos_actuales.empty:
-        # Extraemos promedios
+        # Procesamos los datos: Sacamos el promedio general de asertividad (X) y completitud (Y) por cada proyecto
         df_grafico = datos_actuales.groupby("Proyecto").agg(
             X_Asertividad=("Asertividad", "mean"),
             Y_Completitud=("Completitud", "mean"),
             Muestras=("Participante", "count")
         ).reset_index()
         
+        # Creamos el Scatter Plot interactivo
         fig = go.Figure()
         
-        # Cuadrantes
+        # --- DIBUJO DE LOS 4 CUADRANTES DE FONDO ---
         fig.add_shape(type="rect", x0=2.5, y0=2.5, x1=4.5, y1=4.5, fillcolor="rgba(198, 239, 206, 0.25)", line_width=0)
         fig.add_shape(type="rect", x0=0.5, y0=2.5, x1=2.5, y1=4.5, fillcolor="rgba(255, 230, 153, 0.25)", line_width=0)
         fig.add_shape(type="rect", x0=0.5, y0=0.5, x1=2.5, y1=2.5, fillcolor="rgba(244, 204, 204, 0.25)", line_width=0)
         fig.add_shape(type="rect", x0=2.5, y0=0.5, x1=4.5, y1=2.5, fillcolor="rgba(252, 228, 214, 0.25)", line_width=0)
         
-        # Puntos de Proyectos
+        # --- AGREGAR LOS PUNTOS DE LOS PROYECTOS ---
         fig.add_trace(go.Scatter(
             x=df_grafico["X_Asertividad"],
             y=df_grafico["Y_Completitud"],
@@ -278,21 +281,49 @@ with pestana_dashboard:
             hovertemplate="<b>%{text}</b><br>Asertividad: %{x:.2f}<br>Completitud: %{y:.2f}<extra></extra>"
         ))
         
-        # Ejes Centrales (2.5)
+        # --- AGREGAR LAS LÍNEAS DE CORTE CRUCIALES (Ejes en el centro 2.5) ---
         fig.add_shape(type="line", x0=2.5, y0=0.5, x1=2.5, y1=4.5, line=dict(color="#C00000", width=2, dash="dash"))
         fig.add_shape(type="line", x0=0.5, y0=2.5, x1=4.5, y1=2.5, line=dict(color="#C00000", width=2, dash="dash"))
         
         fig.update_layout(
             xaxis=dict(title="¿Es Asertivo el Resultado? (Eje X)", range=[0.5, 4.5], dtick=0.5, gridcolor="#EAEAEA"),
             yaxis=dict(title="¿Es Completa la Información? (Eje Y)", range=[0.5, 4.5], dtick=0.5, gridcolor="#EAEAEA"),
-            height=650,
-            plot_bgcolor="white",
-            margin=dict(l=40, r=40, t=20, b=40)
+            height=600, plot_bgcolor="white", margin=dict(l=40, r=40, t=20, b=40)
         )
         
+        # Desplegamos el gráfico interactivo
         st.plotly_chart(fig, use_container_width=True)
         
-        st.markdown("### 📋 Tabla de Métricas Consolidadas")
-        st.dataframe(df_grafico.style.format({"X_Asertividad": "{:.2f}", "Y_Completitud": "{:.2f}"}), use_container_width=True)
+        # =========================================================================
+        # NUEVA SECCIÓN: DESGLOSE INTERACTIVO AFIRMACIÓN POR AFIRMACIÓN
+        # =========================================================================
+        st.markdown("---")
+        st.subheader("🔍 Desglose Técnico de Afirmaciones en Tiempo Real")
+        st.write("Selecciona un proyecto para auditar la calificación exacta de cada una de sus viñetas:")
+        
+        # Dropdown para elegir qué proyecto queremos analizar detalladamente en la proyección
+        proyecto_auditar = st.selectbox("Elegir proyecto para auditar:", df_grafico["Proyecto"].unique(), key="auditor_presentador")
+        
+        if proyecto_auditar:
+            # Filtramos los votos únicamente de ese proyecto
+            df_filtrado = datos_actuales[datos_actuales["Proyecto"] == proyecto_auditar]
+            
+            # Agrupamos por la viñeta (Item) para calcular sus promedios específicos
+            df_items = df_filtrado.groupby(["Tipo", "Item"]).agg(
+                Promedio_Asertividad=("Asertividad", "mean"),
+                Promedio_Completitud=("Completitud", "mean"),
+                Votos_Recibidos=("Participante", "count")
+            ).reset_index()
+            
+            # Le damos un formato visual de tabla limpia y estilizada
+            st.dataframe(
+                df_items.style.format({
+                    "Promedio_Asertividad": "{:.2f} / 4.00",
+                    "Promedio_Completitud": "{:.2f} / 4.00"
+                }), 
+                use_container_width=True,
+                hide_index=True
+            )
+            
     else:
         st.info("📊 La matriz aparecerá automáticamente aquí cuando guarden sus primeros votos.")
