@@ -315,10 +315,10 @@ with pestana_dashboard:
                 Votos_Recibidos=("Participante", "count")
             ).reset_index()
             
-            # Le damos un formato visual de tabla limpia y estilizada
+# FORMATO AJUSTADO: Números limpios sin el sufijo de escala
             st.dataframe(
                 df_items.style.format({
-                    "Promedio_Asertividad": "{:.2f},
+                    "Promedio_Asertividad": "{:.2f}",
                     "Promedio_Completitud": "{:.2f}"
                 }), 
                 use_container_width=True,
