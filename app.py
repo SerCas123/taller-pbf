@@ -2,8 +2,6 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 import io
-import requests
-import json
 
 # 1. CONFIGURACIÓN VISUAL DE LA PÁGINA
 st.set_page_config(
@@ -14,10 +12,6 @@ st.set_page_config(
 
 # CONTRASEÑA DEL FACILITADOR
 CONTRASENA_ADMIN = "PBFHonduras2026"
-
-# URL DE LA BASE DE DATOS EN LA NUBE EN TIEMPO REAL (Compartida para todos los celulares)
-# Esta URL permite almacenar de forma externa y segura los votos del taller
-DB_URL = "https://api.keyvalue.xyz/b2c3d4e5/pbf_honduras_taller"
 
 # 2. BASE DE DATOS COMPLETA DE LOS PROYECTOS EN HONDURAS
 DATOS_PORTAFOLIO = {
@@ -92,7 +86,7 @@ DATOS_PORTAFOLIO = {
             "NF2. Las mesas departamentales de prevención, Comisión Tripartita y otros mecanismos permitieron avanzar con el establecimiento y réplica en el territorio nacional.",
             "NF3. Las propuestas normativas elaboradas por juventudes y OSC fueron presentadas y adoptadas por la Secretaría de Derechos Humanos.",
             "NF4. Algunas redes juveniles continúan funcionando de manera autónoma o con acompañamiento de las oficinas municipales.",
-            "NF5. El enfoque participativo y territorial se menciona como modelo innovador y transferible en presentaciones de otros proyectos PBF."
+            "NF5. El enfoque participativo y territorial se menciona como modelo innovador y transferible en presentations de otros proyectos PBF."
         ]
     },
     "PBF/IRF-466 - Pro-Defensoras": {
@@ -169,23 +163,9 @@ DATOS_PORTAFOLIO = {
     }
 }
 
-# 3. FUNCIONES LÓGICAS PARA CONSULTAR LA BASE DE DATOS EXTERNA EN LA NUBE
-def cargar_votos_nube():
-    try:
-        r = requests.get(DB_URL, timeout=5)
-        if r.status_code == 200:
-            datos_json = r.json()
-            return pd.DataFrame(datos_json)
-    except Exception:
-        pass
-    return pd.DataFrame(columns=["Participante", "Proyecto", "Tipo", "Item", "Asertividad", "Completitud"])
-
-def guardar_votos_nube(df_completo):
-    try:
-        registros = df_completo.to_dict(orient="records")
-        requests.post(DB_URL, json=registros, timeout=5)
-    except Exception:
-        pass
+# 3. MEMORIA CENTRAL ABSOLUTA (Fuerza al servidor a compartir la misma tabla entre todos los usuarios)
+if '_DB_TALLER_COMPARTIDA' not in globals():
+    globals()['_DB_TALLER_COMPARTIDA'] = pd.DataFrame(columns=["Participante", "Proyecto", "Tipo", "Item", "Asertividad", "Completitud"])
 
 # --- BARRA LATERAL DE ACCESO PRIVADO CON MEMORIA ---
 if "sesion_admin" not in st.session_state:
@@ -263,14 +243,10 @@ with pestanas_creadas[0]:
                 
                 if enviar_votos:
                     df_nuevos_votos = pd.DataFrame(respuestas_formulario)
-                    # Descargamos los votos que ya existen en la nube para no borrarlos
-                    df_existente = cargar_votos_nube()
-                    df_consolidado = pd.concat([df_existente, df_nuevos_votos], ignore_index=True)
-                    # Guardamos el paquete completo de vuelta a la nube inmediatamente
-                    guardar_votos_nube(df_consolidado)
-                    
+                    # Inyección forzada en la memoria compartida del servidor
+                    globals()['_DB_TALLER_COMPARTIDA'] = pd.concat([globals()['_DB_TALLER_COMPARTIDA'], df_nuevos_votos], ignore_index=True)
                     st.balloons()
-                    st.success(f"¡Excelente! Tus respuestas han sido guardadas en la base de datos central.")
+                    st.success(f"¡Excelente! Tus respuestas han sido transmitidas con éxito.")
                     st.rerun()
     else:
         st.warning("⚠️ Por favor ingresa tu Institución o Nombre en el campo de arriba para habilitar la votación.")
@@ -286,8 +262,8 @@ if es_admin:
         if st.button("🔄 Refrescar Votos del Salón"):
             st.rerun()
             
-        # Forzamos la lectura en vivo desde la base de datos de la nube
-        datos_actuales = cargar_votos_nube()
+        # Leemos la variable compartida
+        datos_actuales = globals()['_DB_TALLER_COMPARTIDA']
         
         if not datos_actuales.empty:
             df_grafico = datos_actuales.groupby("Proyecto").agg(
@@ -362,10 +338,10 @@ if es_admin:
             )
             
             st.markdown("---")
-            # BOTÓN EXCLUSIVO PARA REINICIAR LA DATA DE PRUEBAS
-            if st.button("🗑️ BORRAR TODA LA DATA DE PRUEBAS (Resetear app)", type="primary"):
-                requests.post(DB_URL, json=[], timeout=5)
-                st.warning("¡Base de datos en la nube limpiada correctamente!")
+            # BOTÓN EXCLUSIVO PARA BORRAR TODO Y EMPEZAR DE NUEVO EL TALLER REAL
+            if st.button("🗑️ BORRAR TODAS LAS RESPUESTAS (Resetear para el Taller)", type="primary"):
+                globals()['_DB_TALLER_COMPARTIDA'] = pd.DataFrame(columns=["Participante", "Proyecto", "Tipo", "Item", "Asertividad", "Completitud"])
+                st.warning("¡Base de datos vaciada con éxito!")
                 st.rerun()
         else:
             st.info("📊 La matriz aparecerá automáticamente aquí cuando guarden sus primeros votos reales.")
