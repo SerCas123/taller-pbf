@@ -165,7 +165,7 @@ DATOS_PORTAFOLIO = {
 if "db_simulada" not in st.session_state:
     st.session_state.db_simulada = pd.DataFrame(columns=["Participante", "Proyecto", "Tipo", "Item", "Asertividad", "Completitud"])
 
-modo_hoja_real = False
+modo_hoja_real = True
 try:
     conn = st.connection("gsheets", type=GSheetsConnection)
     df_respuestas = conn.read(worksheet="RespuestasLive")
