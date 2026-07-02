@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 import io
+import requests
+import json
 
 # 1. CONFIGURACIÓN VISUAL DE LA PÁGINA
 st.set_page_config(
@@ -10,8 +12,12 @@ st.set_page_config(
     layout="wide"
 )
 
-# CONTRASEÑA DEL FACILITADOR (Puedes cambiarla aquí por la que tú quieras)
+# CONTRASEÑA DEL FACILITADOR
 CONTRASENA_ADMIN = "PBFHonduras2026"
+
+# URL DE LA BASE DE DATOS EN LA NUBE EN TIEMPO REAL (Compartida para todos los celulares)
+# Esta URL permite almacenar de forma externa y segura los votos del taller
+DB_URL = "https://api.keyvalue.xyz/b2c3d4e5/pbf_honduras_taller"
 
 # 2. BASE DE DATOS COMPLETA DE LOS PROYECTOS EN HONDURAS
 DATOS_PORTAFOLIO = {
@@ -82,7 +88,7 @@ DATOS_PORTAFOLIO = {
             "F3. Financiamiento indirecto a las redes juveniles, formaciones, incidencia y participación juvenil."
         ],
         "no_financiero": [
-            "NF1. Decisión de establish una Mesa Interinstitucional de Prevención y Abordaje de la Conflictividad.",
+            "NF1. Decisión de establecer una Mesa Interinstitucional de Prevención y Abordaje de la Conflictividad.",
             "NF2. Las mesas departamentales de prevención, Comisión Tripartita y otros mecanismos permitieron avanzar con el establecimiento y réplica en el territorio nacional.",
             "NF3. Las propuestas normativas elaboradas por juventudes y OSC fueron presentadas y adoptadas por la Secretaría de Derechos Humanos.",
             "NF4. Algunas redes juveniles continúan funcionando de manera autónoma o con acompañamiento de las oficinas municipales.",
@@ -163,15 +169,23 @@ DATOS_PORTAFOLIO = {
     }
 }
 
-# 3. GESTIÓN DE ALMACENAMIENTO GLOBAL UNIFICADO (Compartido para todo el taller)
-@st.cache_resource
-def obtener_base_datos_global():
-    # Esta función crea una sola tabla en el servidor que todos los usuarios comparten
+# 3. FUNCIONES LÓGICAS PARA CONSULTAR LA BASE DE DATOS EXTERNA EN LA NUBE
+def cargar_votos_nube():
+    try:
+        r = requests.get(DB_URL, timeout=5)
+        if r.status_code == 200:
+            datos_json = r.json()
+            return pd.DataFrame(datos_json)
+    except Exception:
+        pass
     return pd.DataFrame(columns=["Participante", "Proyecto", "Tipo", "Item", "Asertividad", "Completitud"])
 
-# Inicializamos la base de datos global si no existe en la sesión del usuario actual
-if "db_taller" not in st.session_state:
-    st.session_state.db_taller = obtener_base_datos_global()
+def guardar_votos_nube(df_completo):
+    try:
+        registros = df_completo.to_dict(orient="records")
+        requests.post(DB_URL, json=registros, timeout=5)
+    except Exception:
+        pass
 
 # --- BARRA LATERAL DE ACCESO PRIVADO CON MEMORIA ---
 if "sesion_admin" not in st.session_state:
@@ -179,8 +193,6 @@ if "sesion_admin" not in st.session_state:
 
 with st.sidebar:
     st.markdown("### 🔐 Control de Facilitador")
-    
-    # Si ya eres admin, mostramos el botón para cerrar sesión si lo deseas
     if st.session_state.sesion_admin:
         st.success("✅ Modo Consultor Activo")
         if st.button("🔒 Cerrar Sesión de Resultados"):
@@ -194,10 +206,9 @@ with st.sidebar:
         elif codigo_ingresado:
             st.error("❌ Código Incorrecto")
 
-# Asignamos el permiso según la memoria de la sesión
 es_admin = st.session_state.sesion_admin
 
-# 4. MENÚ DE NAVEGACIÓN DINÁMICO (Oculta la pestaña si no es el administrador)
+# 4. MENÚ DE NAVEGACIÓN DINÁMICO
 lista_pestanas = ["📱 EVALUACIÓN (Celulares)"]
 if es_admin:
     lista_pestanas.append("📊 RESULTADOS (Proyector)")
@@ -252,23 +263,31 @@ with pestanas_creadas[0]:
                 
                 if enviar_votos:
                     df_nuevos_votos = pd.DataFrame(respuestas_formulario)
-                    # Guardamos en la base de datos global compartida
-                    st.session_state.db_taller = pd.concat([obtener_base_datos_global(), df_nuevos_votos], ignore_index=True)
+                    # Descargamos los votos que ya existen en la nube para no borrarlos
+                    df_existente = cargar_votos_nube()
+                    df_consolidado = pd.concat([df_existente, df_nuevos_votos], ignore_index=True)
+                    # Guardamos el paquete completo de vuelta a la nube inmediatamente
+                    guardar_votos_nube(df_consolidado)
+                    
                     st.balloons()
-                    st.success(f"¡Excelente! Tus respuestas han sido transmitidas con éxito.")
+                    st.success(f"¡Excelente! Tus respuestas han sido guardadas en la base de datos central.")
                     st.rerun()
     else:
         st.warning("⚠️ Por favor ingresa tu Institución o Nombre en el campo de arriba para habilitar la votación.")
 
 # =========================================================================
-# 📊 PESTAÑA 2: PANTALLA DE RESULTADOS EN TIEMPO REAL (Solo si es Admin)
+# 📊 PESTAÑA 2: PANTALLA DE RESULTADOS EN TIEMPO REAL (Solo Facilitador)
 # =========================================================================
 if es_admin:
     with pestanas_creadas[1]:
         st.title("📊 Cuadrante de Validación Estratégica en Vivo")
         st.write("Esta pantalla consolida los promedios matemáticos de todos los participantes.")
         
-        datos_actuales = st.session_state.db_taller
+        if st.button("🔄 Refrescar Votos del Salón"):
+            st.rerun()
+            
+        # Forzamos la lectura en vivo desde la base de datos de la nube
+        datos_actuales = cargar_votos_nube()
         
         if not datos_actuales.empty:
             df_grafico = datos_actuales.groupby("Proyecto").agg(
@@ -329,7 +348,6 @@ if es_admin:
                 
             st.markdown("---")
             st.subheader("💾 Cierre del Taller y Descarga de Datos")
-            st.write("Presiona este botón al finalizar para obtener el archivo Excel consolidado:")
             
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
@@ -342,5 +360,12 @@ if es_admin:
                 file_name="resultados_taller_catalitico_pbf.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
+            
+            st.markdown("---")
+            # BOTÓN EXCLUSIVO PARA REINICIAR LA DATA DE PRUEBAS
+            if st.button("🗑️ BORRAR TODA LA DATA DE PRUEBAS (Resetear app)", type="primary"):
+                requests.post(DB_URL, json=[], timeout=5)
+                st.warning("¡Base de datos en la nube limpiada correctamente!")
+                st.rerun()
         else:
-            st.info("📊 La matriz aparecerá automáticamente aquí cuando guarden sus primeros votos.")
+            st.info("📊 La matriz aparecerá automáticamente aquí cuando guarden sus primeros votos reales.")
