@@ -1,8 +1,7 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
-from streamlit_gsheets import GSheetsConnection
+import io
 
 # 1. CONFIGURACIÓN VISUAL DE LA PÁGINA
 st.set_page_config(
@@ -11,7 +10,10 @@ st.set_page_config(
     layout="wide"
 )
 
-# 2. BASE DE DATOS COMPLETA DE LOS PROYECTOS
+# CONTRASEÑA DEL FACILITADOR (Puedes cambiarla aquí por la que tú quieras)
+CONTRASENA_ADMIN = "PBFHonduras2026"
+
+# 2. BASE DE DATOS COMPLETA DE LOS PROYECTOS EN HONDURAS
 DATOS_PORTAFOLIO = {
     "PBF/HND/H1 - PARTICIPAZ": {
         "tema": "Transparencia, eficacia institucional e inclusión",
@@ -80,7 +82,7 @@ DATOS_PORTAFOLIO = {
             "F3. Financiamiento indirecto a las redes juveniles, formaciones, incidencia y participación juvenil."
         ],
         "no_financiero": [
-            "NF1. Decisión de establecer una Mesa Interinstitucional de Prevención y Abordaje de la Conflictividad.",
+            "NF1. Decisión de establish una Mesa Interinstitucional de Prevención y Abordaje de la Conflictividad.",
             "NF2. Las mesas departamentales de prevención, Comisión Tripartita y otros mecanismos permitieron avanzar con el establecimiento y réplica en el territorio nacional.",
             "NF3. Las propuestas normativas elaboradas por juventudes y OSC fueron presentadas y adoptadas por la Secretaría de Derechos Humanos.",
             "NF4. Algunas redes juveniles continúan funcionando de manera autónoma o con acompañamiento de las oficinas municipales.",
@@ -161,43 +163,34 @@ DATOS_PORTAFOLIO = {
     }
 }
 
-# 3. GESTIÓN DE LA BASE DE DATOS (SOPORTE LIVE / CONEXIÓN GOOGLE SHEETS)
-modo_hoja_real = True  # Manténlo en True para conectar con Google
+# 3. GESTIÓN DE ALMACENAMIENTO SEGURO EN EL SERVIDOR
+if "db_taller" not in st.session_state:
+    st.session_state.db_taller = pd.DataFrame(columns=["Participante", "Proyecto", "Tipo", "Item", "Asertividad", "Completitud"])
 
-if "db_simulada" not in st.session_state:
-    st.session_state.db_simulada = pd.DataFrame(columns=["Participante", "Proyecto", "Tipo", "Item", "Asertividad", "Completitud"])
+# --- BARRA LATERAL DE ACCESO PRIVADO PARA EL CONSULTOR ---
+with st.sidebar:
+    st.markdown("### 🔐 Control de Facilitador")
+    codigo_ingresado = st.text_input("Código de Acceso para Resultados:", type="password", placeholder="Ingresa el código")
+    es_admin = (codigo_ingresado == CONTRASENA_ADMIN)
+    
+    if es_admin:
+        st.success("✅ Modo Consultor Activo")
+    elif codigo_ingresado:
+        st.error("❌ Código Incorrecto")
 
-df_respuestas = pd.DataFrame(columns=["Participante", "Proyecto", "Tipo", "Item", "Asertividad", "Completitud"])
+# 4. MENÚ DE NAVEGACIÓN DINÁMICO (Oculta la pestaña si no es el administrador)
+lista_pestanas = ["📱 EVALUACIÓN (Celulares)"]
+if es_admin:
+    lista_pestanas.append("📊 RESULTADOS (Proyector)")
 
-if modo_hoja_real:
-    try:
-        conn = st.connection("gsheets", type=GSheetsConnection)
-        # Leemos la hoja de cálculo de Google
-        df_leido = conn.read(worksheet="RespuestasLive")
-        
-        # Si la hoja no está vacía y contiene datos reales, la usamos
-        if df_leido is not None and not df_leido.empty and "Participante" in df_leido.columns:
-            df_respuestas = df_leido
-    except Exception as e:
-        st.error(f"⚠️ Error de conexión con Google Sheets: {e}. Usando almacenamiento alterno.")
-        modo_hoja_real = False
-
-# Si la conexión real falló o está apagada, usamos los datos temporales de la sesión
-if not modo_hoja_real:
-    df_respuestas = st.session_state.db_simulada
-
-# 4. MENÚ DE NAVEGACIÓN PRINCIPAL
-pestana_votar, pestana_dashboard = st.tabs(["📱 EVALUACIÓN (Celulares)", "📊 RESULTADOS (Proyector)"])
+pestanas_creadas = st.tabs(lista_pestanas)
 
 # =========================================================================
 # 📱 PESTAÑA 1: PANEL INTERACTIVO PARA LOS PARTICIPANTES
 # =========================================================================
-with pestana_votar:
+with pestanas_creadas[0]:
     st.title("Taller de Validación de Efectos Catalíticos")
     st.subheader("Portafolio PBF Honduras 2020-2025")
-    
-    if not modo_hoja_real:
-        st.caption("ℹ️ *Modo de prueba activado (conecte Google Sheets para persistencia).*")
         
     usuario_id = st.text_input("Ingresa tu Institución o Nombre para empezar:", placeholder="Ej. PNUD / UNFPA / SEPLAN")
     
@@ -214,7 +207,6 @@ with pestana_votar:
             with st.form(key=f"form_{proyecto_sel}"):
                 respuestas_formulario = []
                 
-                # Componentes Financieros
                 st.markdown("#### 🔴 Evaluación de Componentes Financieros")
                 for item in datos["financiero"]:
                     st.info(item)
@@ -227,7 +219,6 @@ with pestana_votar:
                 
                 st.markdown("---")
                 
-                # Componentes No Financieros
                 st.markdown("#### 🔵 Evaluación de Componentes No Financieros")
                 for item in datos["no_financiero"]:
                     st.info(item)
@@ -242,115 +233,94 @@ with pestana_votar:
                 
                 if enviar_votos:
                     df_nuevos_votos = pd.DataFrame(respuestas_formulario)
-                    
-                    if modo_hoja_real:
-                        # Consolidamos los datos existentes en Google Sheets con los nuevos votos
-                        if df_respuestas.empty:
-                            df_consolidado = df_nuevos_votos
-                        else:
-                            df_consolidado = pd.concat([df_respuestas, df_nuevos_votos], ignore_index=True)
-                        
-                        # Limpiamos filas vacías extrañas si las hay
-                        df_consolidado = df_consolidado.dropna(subset=["Participante", "Proyecto"])
-                        
-                        # Actualizamos la hoja de Google Sheets de manera segura
-                        conn.update(worksheet="RespuestasLive", data=df_consolidado)
-                        
-                        # ¡IMPORTANTE! Limpiamos el caché de Streamlit para que borre los datos viejos
-                        st.cache_data.clear()
-                    else:
-                        # Si sigue en simulación, guarda en memoria
-                        st.session_state.db_simulada = pd.concat([st.session_state.db_simulada, df_nuevos_votos], ignore_index=True)
-                        
+                    st.session_state.db_taller = pd.concat([st.session_state.db_taller, df_nuevos_votos], ignore_index=True)
                     st.balloons()
-                    st.success(f"¡Excelente! Tus respuestas han sido transmitidas y guardadas con éxito.")
+                    st.success(f"¡Excelente! Tus respuestas han sido transmitidas con éxito.")
                     st.rerun()
+    else:
+        st.warning("⚠️ Por favor ingresa tu Institución o Nombre en el campo de arriba para habilitar la votación.")
 
 # =========================================================================
-# 📊 PESTAÑA 2: PANTALLA DE RESULTADOS EN TIEMPO REAL (Para Proyectar)
+# 📊 PESTAÑA 2: PANTALLA DE RESULTADOS EN TIEMPO REAL (Solo si es Admin)
 # =========================================================================
-with pestana_dashboard:
-    st.title("📊 Cuadrante de Validación Estratégica en Vivo")
-    st.write("Esta pantalla consolida los promedios matemáticos de todos los participantes.")
-    
-    # Botón manual para refrescar los datos desde Google Sheets durante el taller
-    if st.button("🔄 Forzar Actualización de la Matriz"):
-        st.rerun()
+if es_admin:
+    with pestanas_creadas[1]:
+        st.title("📊 Cuadrante de Validación Estratégica en Vivo")
+        st.write("Esta pantalla consolida los promedios matemáticos de todos los participantes.")
         
-    # Recargamos la variable con los datos más recientes
-    datos_actuales = df_respuestas if modo_hoja_real else st.session_state.db_simulada
-    
-    if not datos_actuales.empty:
-        # Procesamos los datos: Sacamos el promedio general de asertividad (X) y completitud (Y) por cada proyecto
-        df_grafico = datos_actuales.groupby("Proyecto").agg(
-            X_Asertividad=("Asertividad", "mean"),
-            Y_Completitud=("Completitud", "mean"),
-            Muestras=("Participante", "count")
-        ).reset_index()
+        datos_actuales = st.session_state.db_taller
         
-        # Creamos el Scatter Plot interactivo
-        fig = go.Figure()
-        
-        # --- DIBUJO DE LOS 4 CUADRANTES DE FONDO ---
-        fig.add_shape(type="rect", x0=2.5, y0=2.5, x1=4.5, y1=4.5, fillcolor="rgba(198, 239, 206, 0.25)", line_width=0)
-        fig.add_shape(type="rect", x0=0.5, y0=2.5, x1=2.5, y1=4.5, fillcolor="rgba(255, 230, 153, 0.25)", line_width=0)
-        fig.add_shape(type="rect", x0=0.5, y0=0.5, x1=2.5, y1=2.5, fillcolor="rgba(244, 204, 204, 0.25)", line_width=0)
-        fig.add_shape(type="rect", x0=2.5, y0=0.5, x1=4.5, y1=2.5, fillcolor="rgba(252, 228, 214, 0.25)", line_width=0)
-        
-        # --- AGREGAR LOS PUNTOS DE LOS PROYECTOS ---
-        fig.add_trace(go.Scatter(
-            x=df_grafico["X_Asertividad"],
-            y=df_grafico["Y_Completitud"],
-            mode="markers+text",
-            text=df_grafico["Proyecto"].apply(lambda x: x.split(" - ")[1] if " - " in x else x), 
-            textposition="top center",
-            marker=dict(size=14, color="#1F4E78", line=dict(width=2, color="White")),
-            hovertemplate="<b>%{text}</b><br>Asertividad: %{x:.2f}<br>Completitud: %{y:.2f}<extra></extra>"
-        ))
-        
-        # --- AGREGAR LAS LÍNEAS DE CORTE CRUCIALES (Ejes en el centro 2.5) ---
-        fig.add_shape(type="line", x0=2.5, y0=0.5, x1=2.5, y1=4.5, line=dict(color="#C00000", width=2, dash="dash"))
-        fig.add_shape(type="line", x0=0.5, y0=2.5, x1=4.5, y1=2.5, line=dict(color="#C00000", width=2, dash="dash"))
-        
-        fig.update_layout(
-            xaxis=dict(title="¿Es Asertivo el Resultado? (Eje X)", range=[0.5, 4.5], dtick=0.5, gridcolor="#EAEAEA"),
-            yaxis=dict(title="¿Es Completa la Información? (Eje Y)", range=[0.5, 4.5], dtick=0.5, gridcolor="#EAEAEA"),
-            height=600, plot_bgcolor="white", margin=dict(l=40, r=40, t=20, b=40)
-        )
-        
-        # Desplegamos el gráfico interactivo
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # =========================================================================
-        # NUEVA SECCIÓN: DESGLOSE INTERACTIVO AFIRMACIÓN POR AFIRMACIÓN
-        # =========================================================================
-        st.markdown("---")
-        st.subheader("🔍 Desglose Técnico de Afirmaciones en Tiempo Real")
-        st.write("Selecciona un proyecto para auditar la calificación exacta de cada una de sus viñetas:")
-        
-        # Dropdown para elegir qué proyecto queremos analizar detalladamente en la proyección
-        proyecto_auditar = st.selectbox("Elegir proyecto para auditar:", df_grafico["Proyecto"].unique(), key="auditor_presentador")
-        
-        if proyecto_auditar:
-            # Filtramos los votos únicamente de ese proyecto
-            df_filtrado = datos_actuales[datos_actuales["Proyecto"] == proyecto_auditar]
-            
-            # Agrupamos por la viñeta (Item) para calcular sus promedios específicos
-            df_items = df_filtrado.groupby(["Tipo", "Item"]).agg(
-                Promedio_Asertividad=("Asertividad", "mean"),
-                Promedio_Completitud=("Completitud", "mean"),
-                Votos_Recibidos=("Participante", "count")
+        if not datos_actuales.empty:
+            df_grafico = datos_actuales.groupby("Proyecto").agg(
+                X_Asertividad=("Asertividad", "mean"),
+                Y_Completitud=("Completitud", "mean"),
+                Muestras=("Participante", "count")
             ).reset_index()
             
-# FORMATO AJUSTADO: Números limpios sin el sufijo de escala
-            st.dataframe(
-                df_items.style.format({
-                    "Promedio_Asertividad": "{:.2f}",
-                    "Promedio_Completitud": "{:.2f}"
-                }), 
-                use_container_width=True,
-                hide_index=True
+            fig = go.Figure()
+            
+            fig.add_shape(type="rect", x0=2.5, y0=2.5, x1=4.5, y1=4.5, fillcolor="rgba(198, 239, 206, 0.25)", line_width=0)
+            fig.add_shape(type="rect", x0=0.5, y0=2.5, x1=2.5, y1=4.5, fillcolor="rgba(255, 230, 153, 0.25)", line_width=0)
+            fig.add_shape(type="rect", x0=0.5, y0=0.5, x1=2.5, y1=2.5, fillcolor="rgba(244, 204, 204, 0.25)", line_width=0)
+            fig.add_shape(type="rect", x0=2.5, y0=0.5, x1=4.5, y1=2.5, fillcolor="rgba(252, 228, 214, 0.25)", line_width=0)
+            
+            fig.add_trace(go.Scatter(
+                x=df_grafico["X_Asertividad"],
+                y=df_grafico["Y_Completitud"],
+                mode="markers+text",
+                text=df_grafico["Proyecto"].apply(lambda x: x.split(" - ")[1] if " - " in x else x), 
+                textposition="top center",
+                marker=dict(size=14, color="#1F4E78", line=dict(width=2, color="White")),
+                hovertemplate="<b>%{text}</b><br>Asertividad: %{x:.2f}<br>Completitud: %{y:.2f}<extra></extra>"
+            ))
+            
+            fig.add_shape(type="line", x0=2.5, y0=0.5, x1=2.5, y1=4.5, line=dict(color="#C00000", width=2, dash="dash"))
+            fig.add_shape(type="line", x0=0.5, y0=2.5, x1=4.5, y1=2.5, line=dict(color="#C00000", width=2, dash="dash"))
+            
+            fig.update_layout(
+                xaxis=dict(title="¿Es Asertivo el Resultado? (Eje X)", range=[0.5, 4.5], dtick=0.5, gridcolor="#EAEAEA"),
+                yaxis=dict(title="¿Es Completa la Información? (Eje Y)", range=[0.5, 4.5], dtick=0.5, gridcolor="#EAEAEA"),
+                height=600, plot_bgcolor="white", margin=dict(l=40, r=40, t=20, b=40)
             )
             
-    else:
-        st.info("📊 La matriz aparecerá automáticamente aquí cuando guarden sus primeros votos.")
+            st.plotly_chart(fig, width="stretch")
+            
+            st.markdown("---")
+            st.subheader("🔍 Desglose Técnico de Afirmaciones en Tiempo Real")
+            
+            proyecto_auditar = st.selectbox("Elegir proyecto para auditar:", df_grafico["Proyecto"].unique())
+            
+            if proyecto_auditar:
+                df_filtrado = datos_actuales[datos_actuales["Proyecto"] == proyecto_auditar]
+                df_items = df_filtrado.groupby(["Tipo", "Item"]).agg(
+                    Promedio_Asertividad=("Asertividad", "mean"),
+                    Promedio_Completitud=("Completitud", "mean"),
+                    Votos_Recibidos=("Participante", "count")
+                ).reset_index()
+                
+                st.dataframe(
+                    df_items.style.format({
+                        "Promedio_Asertividad": "{:.2f}",
+                        "Promedio_Completitud": "{:.2f}"
+                    }), 
+                    width="stretch",
+                    hide_index=True
+                )
+                
+            st.markdown("---")
+            st.subheader("💾 Cierre del Taller y Descarga de Datos")
+            st.write("Presiona este botón al finalizar para obtener el archivo Excel consolidado:")
+            
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                datos_actuales.to_excel(writer, index=False, sheet_name='Resultados_Validacion')
+            processed_data = output.getvalue()
+            
+            st.download_button(
+                label="📥 Descargar Base de Datos Consolidadas (.xlsx)",
+                data=processed_data,
+                file_name="resultados_taller_catalitico_pbf.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+        else:
+            st.info("📊 La matriz aparecerá automáticamente aquí cuando guarden sus primeros votos.")
