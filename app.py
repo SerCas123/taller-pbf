@@ -318,8 +318,8 @@ with pestana_dashboard:
             # Le damos un formato visual de tabla limpia y estilizada
             st.dataframe(
                 df_items.style.format({
-                    "Promedio_Asertividad": "{:.2f} / 4.00",
-                    "Promedio_Completitud": "{:.2f} / 4.00"
+                    "Promedio_Asertividad": "{:.2f},
+                    "Promedio_Completitud": "{:.2f}"
                 }), 
                 use_container_width=True,
                 hide_index=True
