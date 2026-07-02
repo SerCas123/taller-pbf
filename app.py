@@ -163,9 +163,15 @@ DATOS_PORTAFOLIO = {
     }
 }
 
-# 3. GESTIÓN DE ALMACENAMIENTO SEGURO EN EL SERVIDOR
+# 3. GESTIÓN DE ALMACENAMIENTO GLOBAL UNIFICADO (Compartido para todo el taller)
+@st.cache_resource
+def obtener_base_datos_global():
+    # Esta función crea una sola tabla en el servidor que todos los usuarios comparten
+    return pd.DataFrame(columns=["Participante", "Proyecto", "Tipo", "Item", "Asertividad", "Completitud"])
+
+# Inicializamos la base de datos global si no existe en la sesión del usuario actual
 if "db_taller" not in st.session_state:
-    st.session_state.db_taller = pd.DataFrame(columns=["Participante", "Proyecto", "Tipo", "Item", "Asertividad", "Completitud"])
+    st.session_state.db_taller = obtener_base_datos_global()
 
 # --- BARRA LATERAL DE ACCESO PRIVADO CON MEMORIA ---
 if "sesion_admin" not in st.session_state:
@@ -246,7 +252,8 @@ with pestanas_creadas[0]:
                 
                 if enviar_votos:
                     df_nuevos_votos = pd.DataFrame(respuestas_formulario)
-                    st.session_state.db_taller = pd.concat([st.session_state.db_taller, df_nuevos_votos], ignore_index=True)
+                    # Guardamos en la base de datos global compartida
+                    st.session_state.db_taller = pd.concat([obtener_base_datos_global(), df_nuevos_votos], ignore_index=True)
                     st.balloons()
                     st.success(f"¡Excelente! Tus respuestas han sido transmitidas con éxito.")
                     st.rerun()
