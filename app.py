@@ -161,16 +161,29 @@ DATOS_PORTAFOLIO = {
     }
 }
 
-# 3. GESTIÓN DE LA BASE DE DATOS (SOPORTE LIVE / SIMULACIÓN LOCAl)
+# 3. GESTIÓN DE LA BASE DE DATOS (SOPORTE LIVE / CONEXIÓN GOOGLE SHEETS)
+modo_hoja_real = True  # Manténlo en True para conectar con Google
+
 if "db_simulada" not in st.session_state:
     st.session_state.db_simulada = pd.DataFrame(columns=["Participante", "Proyecto", "Tipo", "Item", "Asertividad", "Completitud"])
 
-modo_hoja_real = True
-try:
-    conn = st.connection("gsheets", type=GSheetsConnection)
-    df_respuestas = conn.read(worksheet="RespuestasLive")
-    modo_hoja_real = True
-except Exception:
+df_respuestas = pd.DataFrame(columns=["Participante", "Proyecto", "Tipo", "Item", "Asertividad", "Completitud"])
+
+if modo_hoja_real:
+    try:
+        conn = st.connection("gsheets", type=GSheetsConnection)
+        # Leemos la hoja de cálculo de Google
+        df_leido = conn.read(worksheet="RespuestasLive")
+        
+        # Si la hoja no está vacía y contiene datos reales, la usamos
+        if df_leido is not None and not df_leido.empty and "Participante" in df_leido.columns:
+            df_respuestas = df_leido
+    except Exception as e:
+        st.error(f"⚠️ Error de conexión con Google Sheets: {e}. Usando almacenamiento alterno.")
+        modo_hoja_real = False
+
+# Si la conexión real falló o está apagada, usamos los datos temporales de la sesión
+if not modo_hoja_real:
     df_respuestas = st.session_state.db_simulada
 
 # 4. MENÚ DE NAVEGACIÓN PRINCIPAL
@@ -229,15 +242,29 @@ with pestana_votar:
                 
                 if enviar_votos:
                     df_nuevos_votos = pd.DataFrame(respuestas_formulario)
+                    
                     if modo_hoja_real:
-                        df_consolidado = pd.concat([df_respuestas, df_nuevos_votos], ignore_index=True)
+                        # Consolidamos los datos existentes en Google Sheets con los nuevos votos
+                        if df_respuestas.empty:
+                            df_consolidado = df_nuevos_votos
+                        else:
+                            df_consolidado = pd.concat([df_respuestas, df_nuevos_votos], ignore_index=True)
+                        
+                        # Limpiamos filas vacías extrañas si las hay
+                        df_consolidado = df_consolidado.dropna(subset=["Participante", "Proyecto"])
+                        
+                        # Actualizamos la hoja de Google Sheets de manera segura
                         conn.update(worksheet="RespuestasLive", data=df_consolidado)
+                        
+                        # ¡IMPORTANTE! Limpiamos el caché de Streamlit para que borre los datos viejos
+                        st.cache_data.clear()
                     else:
+                        # Si sigue en simulación, guarda en memoria
                         st.session_state.db_simulada = pd.concat([st.session_state.db_simulada, df_nuevos_votos], ignore_index=True)
+                        
                     st.balloons()
-                    st.success(f"¡Excelente! Tus respuestas han sido transmitidas con éxito.")
-    else:
-        st.warning("⚠️ Por favor ingresa tu Institución o Nombre en el campo de arriba para habilitar la votación.")
+                    st.success(f"¡Excelente! Tus respuestas han sido transmitidas y guardadas con éxito.")
+                    st.rerun()
 
 # =========================================================================
 # 📊 PESTAÑA 2: PANTALLA DE RESULTADOS EN TIEMPO REAL (Para Proyectar)
