@@ -167,16 +167,29 @@ DATOS_PORTAFOLIO = {
 if "db_taller" not in st.session_state:
     st.session_state.db_taller = pd.DataFrame(columns=["Participante", "Proyecto", "Tipo", "Item", "Asertividad", "Completitud"])
 
-# --- BARRA LATERAL DE ACCESO PRIVADO PARA EL CONSULTOR ---
+# --- BARRA LATERAL DE ACCESO PRIVADO CON MEMORIA ---
+if "sesion_admin" not in st.session_state:
+    st.session_state.sesion_admin = False
+
 with st.sidebar:
     st.markdown("### 🔐 Control de Facilitador")
-    codigo_ingresado = st.text_input("Código de Acceso para Resultados:", type="password", placeholder="Ingresa el código")
-    es_admin = (codigo_ingresado == CONTRASENA_ADMIN)
     
-    if es_admin:
+    # Si ya eres admin, mostramos el botón para cerrar sesión si lo deseas
+    if st.session_state.sesion_admin:
         st.success("✅ Modo Consultor Activo")
-    elif codigo_ingresado:
-        st.error("❌ Código Incorrecto")
+        if st.button("🔒 Cerrar Sesión de Resultados"):
+            st.session_state.sesion_admin = False
+            st.rerun()
+    else:
+        codigo_ingresado = st.text_input("Código de Acceso para Resultados:", type="password", placeholder="Ingresa el código")
+        if codigo_ingresado == CONTRASENA_ADMIN:
+            st.session_state.sesion_admin = True
+            st.rerun()
+        elif codigo_ingresado:
+            st.error("❌ Código Incorrecto")
+
+# Asignamos el permiso según la memoria de la sesión
+es_admin = st.session_state.sesion_admin
 
 # 4. MENÚ DE NAVEGACIÓN DINÁMICO (Oculta la pestaña si no es el administrador)
 lista_pestanas = ["📱 EVALUACIÓN (Celulares)"]
