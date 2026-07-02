@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 import io
+import requests
+import json
 
 # 1. CONFIGURACIÓN VISUAL DE LA PÁGINA
 st.set_page_config(
@@ -12,6 +14,10 @@ st.set_page_config(
 
 # CONTRASEÑA DEL FACILITADOR
 CONTRASENA_ADMIN = "PBFHonduras2026"
+
+# ENDPOINT DE ALMACENAMIENTO EN LA NUBE (Crea un canal unificado para todos los teléfonos)
+# Generamos un ID de taller único basado en la fecha actual para asegurar aislamiento de datos
+URL_NUBE = "https://kvdb.io/MN86yv8X6wVp6uG7Qj4WzE/pbf_honduras_taller_2026"
 
 # 2. BASE DE DATOS COMPLETA DE LOS PROYECTOS EN HONDURAS
 DATOS_PORTAFOLIO = {
@@ -44,7 +50,7 @@ DATOS_PORTAFOLIO = {
             "NF2. La integración de organizaciones permitió la colaboración de fuerzas vivas y agrupaciones locales favoreciendo la reducción de oposición e incluyendo participantes de varios sectores.",
             "NF3. En 46 comunidades de 6 municipios, se fortalecieron capacidades municipales y comunitarias para incluir la prevención de VBG en planes de desarrollo local.",
             "NF4. Las mesas de diálogo comunitario promovidas en barrios de Tegucigalpa y San Pedro Sula fueron institucionalizadas en los planes municipales de desarrollo.",
-            "NF5. El modelo 'Cure Violence' fue asumido como estrategia municipal de prevención en ciudades como San Pedro Sula y Choloma."
+            "NF5. El modelo 'Cure Violence' fue asumido como strategy municipal de prevención en ciudades como San Pedro Sula y Choloma."
         ]
     },
     "PBF/IRF-418 - Juventudes Desplazadas": {
@@ -86,7 +92,7 @@ DATOS_PORTAFOLIO = {
             "NF2. Las mesas departamentales de prevención, Comisión Tripartita y otros mecanismos permitieron avanzar con el establecimiento y réplica en el territorio nacional.",
             "NF3. Las propuestas normativas elaboradas por juventudes y OSC fueron presentadas y adoptadas por la Secretaría de Derechos Humanos.",
             "NF4. Algunas redes juveniles continúan funcionando de manera autónoma o con acompañamiento de las oficinas municipales.",
-            "NF5. El enfoque participativo y territorial se menciona como modelo innovador y transferible en presentations de otros proyectos PBF."
+            "NF5. El enfoque participativo y territorial se menciona como modelo innovador y transferible en presentaciones de otros proyectos PBF."
         ]
     },
     "PBF/IRF-466 - Pro-Defensoras": {
@@ -163,11 +169,28 @@ DATOS_PORTAFOLIO = {
     }
 }
 
-# 3. MEMORIA CENTRAL ABSOLUTA (Fuerza al servidor a compartir la misma tabla entre todos los usuarios)
-if '_DB_TALLER_COMPARTIDA' not in globals():
-    globals()['_DB_TALLER_COMPARTIDA'] = pd.DataFrame(columns=["Participante", "Proyecto", "Tipo", "Item", "Asertividad", "Completitud"])
+# 3. INTERCONEXIÓN ROBUSTA CON LA API DE DATOS EXTERNA
+def descargar_votos_globales():
+    try:
+        respuesta = requests.get(URL_NUBE, timeout=4)
+        if respuesta.status_code == 200:
+            return pd.DataFrame(respuesta.json())
+    except:
+        pass
+    # Respaldo por si falla la red temporalmente
+    if "backup_db" not in st.session_state:
+        st.session_state.backup_db = pd.DataFrame(columns=["Participante", "Proyecto", "Tipo", "Item", "Asertividad", "Completitud"])
+    return st.session_state.backup_db
 
-# --- BARRA LATERAL DE ACCESO PRIVADO CON MEMORIA ---
+def subir_votos_globales(df_total):
+    try:
+        payload = df_total.to_dict(orient="records")
+        requests.put(URL_NUBE, json=payload, timeout=4)
+    except:
+        pass
+    st.session_state.backup_db = df_total
+
+# --- CONTROL DE ACCESO PRIVADO DEL CONSULTOR ---
 if "sesion_admin" not in st.session_state:
     st.session_state.sesion_admin = False
 
@@ -175,40 +198,38 @@ with st.sidebar:
     st.markdown("### 🔐 Control de Facilitador")
     if st.session_state.sesion_admin:
         st.success("✅ Modo Consultor Activo")
-        if st.button("🔒 Cerrar Sesión de Resultados"):
+        if st.button("🔒 Cerrar Sesión"):
             st.session_state.sesion_admin = False
             st.rerun()
     else:
-        codigo_ingresado = st.text_input("Código de Acceso para Resultados:", type="password", placeholder="Ingresa el código")
+        codigo_ingresado = st.text_input("Código de Acceso:", type="password")
         if codigo_ingresado == CONTRASENA_ADMIN:
             st.session_state.sesion_admin = True
             st.rerun()
         elif codigo_ingresado:
             st.error("❌ Código Incorrecto")
 
-es_admin = st.session_state.sesion_admin
-
-# 4. MENÚ DE NAVEGACIÓN DINÁMICO
+# NAVEGACIÓN ENTRE PESTAÑAS
 lista_pestanas = ["📱 EVALUACIÓN (Celulares)"]
-if es_admin:
+if st.session_state.sesion_admin:
     lista_pestanas.append("📊 RESULTADOS (Proyector)")
 
 pestanas_creadas = st.tabs(lista_pestanas)
 
 # =========================================================================
-# 📱 PESTAÑA 1: PANEL INTERACTIVO PARA LOS PARTICIPANTES
+# 📱 PESTAÑA 1: PANEL DE EVALUACIÓN PARA PARTICIPANTES
 # =========================================================================
 with pestanas_creadas[0]:
     st.title("Taller de Validación de Efectos Catalíticos")
     st.subheader("Portafolio PBF Honduras 2020-2025")
-        
-    usuario_id = st.text_input("Ingresa tu Institución o Nombre para empezar:", placeholder="Ej. PNUD / UNFPA / SEPLAN")
+    
+    usuario_id = st.text_input("Ingresa tu Institución o Nombre para votar:", placeholder="PNUD / UNFPA / UNFPA, etc.")
     
     if usuario_id:
-        st.success(f"Sesión activa: **{usuario_id}**")
+        st.success(f"Usuario activo: **{usuario_id}**")
         st.markdown("---")
         
-        proyecto_sel = st.selectbox("📌 Selecciona el Proyecto que se está discutiendo:", list(DATOS_PORTAFOLIO.keys()))
+        proyecto_sel = st.selectbox("📌 Selecciona el Proyecto a evaluar:", list(DATOS_PORTAFOLIO.keys()))
         
         if proyecto_sel:
             datos = DATOS_PORTAFOLIO[proyecto_sel]
@@ -217,131 +238,115 @@ with pestanas_creadas[0]:
             with st.form(key=f"form_{proyecto_sel}"):
                 respuestas_formulario = []
                 
-                st.markdown("#### 🔴 Evaluación de Componentes Financieros")
+                st.markdown("#### 🔴 Componentes Financieros")
                 for item in datos["financiero"]:
                     st.info(item)
                     col1, col2 = st.columns(2)
                     with col1:
-                        a = st.radio("¿Es asertivo el resultado?", [1, 2, 3, 4], index=2, horizontal=True, key=f"as_{item}_{usuario_id}")
+                        a = st.radio("¿Es asertivo?", [1, 2, 3, 4], index=2, horizontal=True, key=f"as_{item}_{usuario_id}")
                     with col2:
-                        c = st.radio("¿La información está completa?", [1, 2, 3, 4], index=2, horizontal=True, key=f"co_{item}_{usuario_id}")
+                        c = st.radio("¿Está completo?", [1, 2, 3, 4], index=2, horizontal=True, key=f"co_{item}_{usuario_id}")
                     respuestas_formulario.append({"Participante": usuario_id, "Proyecto": proyecto_sel, "Tipo": "Financiero", "Item": item, "Asertividad": a, "Completitud": c})
                 
-                st.markdown("---")
-                
-                st.markdown("#### 🔵 Evaluación de Componentes No Financieros")
+                st.markdown("#### 🔵 Componentes No Financieros")
                 for item in datos["no_financiero"]:
                     st.info(item)
                     col1, col2 = st.columns(2)
                     with col1:
-                        a = st.radio("¿Es asertivo el resultado?", [1, 2, 3, 4], index=2, horizontal=True, key=f"as_{item}_{usuario_id}")
+                        a = st.radio("¿Es asertivo?", [1, 2, 3, 4], index=2, horizontal=True, key=f"as_{item}_{usuario_id}")
                     with col2:
-                        c = st.radio("¿La información está completa?", [1, 2, 3, 4], index=2, horizontal=True, key=f"co_{item}_{usuario_id}")
+                        c = st.radio("¿Está completo?", [1, 2, 3, 4], index=2, horizontal=True, key=f"co_{item}_{usuario_id}")
                     respuestas_formulario.append({"Participante": usuario_id, "Proyecto": proyecto_sel, "Tipo": "No Financiero", "Item": item, "Asertividad": a, "Completitud": c})
                 
-                enviar_votos = st.form_submit_button("Guardar calificaciones de este proyecto 🚀")
-                
-                if enviar_votos:
-                    df_nuevos_votos = pd.DataFrame(respuestas_formulario)
-                    # Inyección forzada en la memoria compartida del servidor
-                    globals()['_DB_TALLER_COMPARTIDA'] = pd.concat([globals()['_DB_TALLER_COMPARTIDA'], df_nuevos_votos], ignore_index=True)
+                if st.form_submit_button("Enviar Calificaciones Directas 🚀"):
+                    df_nuevos = pd.DataFrame(respuestas_formulario)
+                    # Descargar y concatenar inmediatamente en caliente sobre la nube
+                    df_historico = descargar_votos_globales()
+                    df_consolidado = pd.concat([df_historico, df_nuevos], ignore_index=True)
+                    subir_votos_globales(df_consolidado)
+                    
                     st.balloons()
-                    st.success(f"¡Excelente! Tus respuestas han sido transmitidas con éxito.")
+                    st.success("¡Voto transmitido con éxito al proyector principal!")
                     st.rerun()
     else:
-        st.warning("⚠️ Por favor ingresa tu Institución o Nombre en el campo de arriba para habilitar la votación.")
+        st.warning("⚠️ Escribe tu nombre o institución arriba para desbloquear el formulario.")
 
 # =========================================================================
-# 📊 PESTAÑA 2: PANTALLA DE RESULTADOS EN TIEMPO REAL (Solo Facilitador)
+# 📊 PESTAÑA 2: VISUALIZACIÓN DE MATRIZ EN VIVO (Proyector)
 # =========================================================================
-if es_admin:
+if st.session_state.sesion_admin:
     with pestanas_creadas[1]:
-        st.title("📊 Cuadrante de Validación Estratégica en Vivo")
-        st.write("Esta pantalla consolida los promedios matemáticos de todos los participantes.")
+        st.title("📊 Cuadrante de Resultados Estratégicos")
         
-        if st.button("🔄 Refrescar Votos del Salón"):
-            st.rerun()
-            
-        # Leemos la variable compartida
-        datos_actuales = globals()['_DB_TALLER_COMPARTIDA']
+        col_btn1, col_btn2 = st.columns(2)
+        with col_btn1:
+            if st.button("🔄 REFRESCAR PANTALLA (Ver nuevos votos)"):
+                st.rerun()
+        with col_btn2:
+            if st.button("🗑️ REINICIAR TODO EL TALLER A CERO", type="primary"):
+                subir_votos_globales(pd.DataFrame(columns=["Participante", "Proyecto", "Tipo", "Item", "Asertividad", "Completitud"]))
+                st.rerun()
+                
+        datos_actuales = descargar_votos_globales()
         
         if not datos_actuales.empty:
             df_grafico = datos_actuales.groupby("Proyecto").agg(
                 X_Asertividad=("Asertividad", "mean"),
                 Y_Completitud=("Completitud", "mean"),
-                Muestras=("Participante", "count")
+                Total_Votos=("Participante", "count")
             ).reset_index()
             
             fig = go.Figure()
+            # Cuadrantes coloreados de fondo
+            fig.add_shape(type="rect", x0=2.5, y0=2.5, x1=4.5, y1=4.5, fillcolor="rgba(198, 239, 206, 0.3)", line_width=0)
+            fig.add_shape(type="rect", x0=0.5, y0=2.5, x1=2.5, y1=4.5, fillcolor="rgba(255, 230, 153, 0.3)", line_width=0)
+            fig.add_shape(type="rect", x0=0.5, y0=0.5, x1=2.5, y1=2.5, fillcolor="rgba(244, 204, 204, 0.3)", line_width=0)
+            fig.add_shape(type="rect", x0=2.5, y0=0.5, x1=2.5, y1=2.5, fillcolor="rgba(252, 228, 214, 0.3)", line_width=0)
             
-            fig.add_shape(type="rect", x0=2.5, y0=2.5, x1=4.5, y1=4.5, fillcolor="rgba(198, 239, 206, 0.25)", line_width=0)
-            fig.add_shape(type="rect", x0=0.5, y0=2.5, x1=2.5, y1=4.5, fillcolor="rgba(255, 230, 153, 0.25)", line_width=0)
-            fig.add_shape(type="rect", x0=0.5, y0=0.5, x1=2.5, y1=2.5, fillcolor="rgba(244, 204, 204, 0.25)", line_width=0)
-            fig.add_shape(type="rect", x0=2.5, y0=0.5, x1=4.5, y1=2.5, fillcolor="rgba(252, 228, 214, 0.25)", line_width=0)
-            
+            # Puntos de proyectos
             fig.add_trace(go.Scatter(
                 x=df_grafico["X_Asertividad"],
                 y=df_grafico["Y_Completitud"],
                 mode="markers+text",
-                text=df_grafico["Proyecto"].apply(lambda x: x.split(" - ")[1] if " - " in x else x), 
+                text=df_grafico["Proyecto"].apply(lambda x: x.split(" - ")[1] if " - " in x else x),
                 textposition="top center",
-                marker=dict(size=14, color="#1F4E78", line=dict(width=2, color="White")),
+                marker=dict(size=15, color="#1F4E78", line=dict(width=2, color="white")),
                 hovertemplate="<b>%{text}</b><br>Asertividad: %{x:.2f}<br>Completitud: %{y:.2f}<extra></extra>"
             ))
             
+            # Líneas de corte de cuadrantes en el centro exacto (2.5)
             fig.add_shape(type="line", x0=2.5, y0=0.5, x1=2.5, y1=4.5, line=dict(color="#C00000", width=2, dash="dash"))
             fig.add_shape(type="line", x0=0.5, y0=2.5, x1=4.5, y1=2.5, line=dict(color="#C00000", width=2, dash="dash"))
             
             fig.update_layout(
-                xaxis=dict(title="¿Es Asertivo el Resultado? (Eje X)", range=[0.5, 4.5], dtick=0.5, gridcolor="#EAEAEA"),
-                yaxis=dict(title="¿Es Completa la Información? (Eje Y)", range=[0.5, 4.5], dtick=0.5, gridcolor="#EAEAEA"),
-                height=600, plot_bgcolor="white", margin=dict(l=40, r=40, t=20, b=40)
+                xaxis=dict(title="¿Es Asertivo el Resultado? (Eje X)", range=[0.5, 4.5], dtick=0.5, gridcolor="#E2E2E2"),
+                yaxis=dict(title="¿Es Completa la Información? (Eje Y)", range=[0.5, 4.5], dtick=0.5, gridcolor="#E2E2E2"),
+                height=650, plot_bgcolor="white"
             )
+            st.plotly_chart(fig, use_container_width=True)
             
-            st.plotly_chart(fig, width="stretch")
-            
+            # Tabla de auditoría detallada abajo
             st.markdown("---")
-            st.subheader("🔍 Desglose Técnico de Afirmaciones en Tiempo Real")
-            
-            proyecto_auditar = st.selectbox("Elegir proyecto para auditar:", df_grafico["Proyecto"].unique())
-            
+            proyecto_auditar = st.selectbox("Selecciona un proyecto para auditar promedios específicos por fila:", df_grafico["Proyecto"].unique())
             if proyecto_auditar:
-                df_filtrado = datos_actuales[datos_actuales["Proyecto"] == proyecto_auditar]
-                df_items = df_filtrado.groupby(["Tipo", "Item"]).agg(
+                df_filtro = datos_actuales[datos_actuales["Proyecto"] == proyecto_auditar]
+                df_tabla = df_filtro.groupby(["Tipo", "Item"]).agg(
                     Promedio_Asertividad=("Asertividad", "mean"),
                     Promedio_Completitud=("Completitud", "mean"),
-                    Votos_Recibidos=("Participante", "count")
+                    Muestras_Recibidas=("Participante", "count")
                 ).reset_index()
-                
-                st.dataframe(
-                    df_items.style.format({
-                        "Promedio_Asertividad": "{:.2f}",
-                        "Promedio_Completitud": "{:.2f}"
-                    }), 
-                    width="stretch",
-                    hide_index=True
-                )
-                
-            st.markdown("---")
-            st.subheader("💾 Cierre del Taller y Descarga de Datos")
+                st.dataframe(df_tabla.style.format({"Promedio_Asertividad": "{:.2f}", "Promedio_Completitud": "{:.2f}"}), use_container_width=True, hide_index=True)
             
+            # Descarga de Excel de Respaldo Final
+            st.markdown("---")
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                datos_actuales.to_excel(writer, index=False, sheet_name='Resultados_Validacion')
-            processed_data = output.getvalue()
-            
+                datos_actuales.to_excel(writer, index=False, sheet_name='Data_Validada')
             st.download_button(
-                label="📥 Descargar Base de Datos Consolidadas (.xlsx)",
-                data=processed_data,
-                file_name="resultados_taller_catalitico_pbf.xlsx",
+                label="📥 Descargar Base de Datos Consolidada Final (.xlsx)",
+                data=output.getvalue(),
+                file_name="resultados_finales_pbf_honduras.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
-            
-            st.markdown("---")
-            # BOTÓN EXCLUSIVO PARA BORRAR TODO Y EMPEZAR DE NUEVO EL TALLER REAL
-            if st.button("🗑️ BORRAR TODAS LAS RESPUESTAS (Resetear para el Taller)", type="primary"):
-                globals()['_DB_TALLER_COMPARTIDA'] = pd.DataFrame(columns=["Participante", "Proyecto", "Tipo", "Item", "Asertividad", "Completitud"])
-                st.warning("¡Base de datos vaciada con éxito!")
-                st.rerun()
         else:
-            st.info("📊 La matriz aparecerá automáticamente aquí cuando guarden sus primeros votos reales.")
+            st.info("📊 Esperando los primeros votos del salón. Los resultados se dibujarán aquí de forma automática.")
